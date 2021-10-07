@@ -1,6 +1,30 @@
 import { makeAutoObservable } from "mobx"
 import { fromPromise } from "mobx-utils"
 import { uiStore } from "."
+import { getAllVariableReferences } from "../function-parsing"
+
+function mapAndFilter (callback) {
+    const returning = []
+
+    if (Array.isArray(this)) {
+        var data = this
+    } else {
+        var data = [...this]
+    }
+
+    for (let i = 0; i < data.length; i++) {
+        const current = data[i]
+        const callbackResult = callback(current)
+
+        if (callbackResult !== undefined && callbackResult !== null) {
+            returning.push(callbackResult)
+        }
+    }
+
+    return returning
+}
+Array.prototype.mapAndFilter = mapAndFilter
+Set.prototype.mapAndFilter = mapAndFilter
 
 export const letters = ['a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z']
 const initialColumns = letters.length
@@ -19,7 +43,7 @@ export function indexToCellName (index) {
     return [letters[index[1]], index[0]].join('')
 }
 
-class Cells {
+class CellStore {
     // A 2D array representing the spreadsheet
     cells
 
@@ -111,17 +135,19 @@ class Cell {
                 if (err.toString().includes('[MobX] Cycle detected in computation')) {
                     return 'cycle detected'
                 }
+                console.log(err)
                 return 'unknown error'
             }
 
             variables['i'] = this.index[0]
             variables['j'] = this.index[1]
-
-            let functionContentWithoutSpecialChars = this.rawContent.replaceAll(/[^0.]([a-z]+\$?[0-9]+\$?)/gi, (fullMatch) => fullMatch.replace(/\$/g, ''))
-            functionContentWithoutSpecialChars = functionContentWithoutSpecialChars.replaceAll(/\.{3}([a-z]+\$?[0-9]+\$?)/gi, (fullMatch) => fullMatch.replace(/\$/g, ''))
+            variables['fetch'] = window.puppeteerFetch
+            variables['puppeteer'] = window.puppeteer
+            variables['setTimeout'] = null
+            variables['setInterval'] = null
 
             try {
-                const func = new Function(...Object.keys(variables), functionContentWithoutSpecialChars)
+                const func = new Function(...Object.keys(variables), this.rawContent)
                 let functionResult = func(...Object.values(variables))
                 // Test for promise
                 if (typeof functionResult?.then === 'function') {
@@ -228,17 +254,20 @@ class Cell {
     }
 
     get variableReferences () {
-        const variableNames = [...(new Set([
-            ...Array.from(this.rawContent.matchAll(/[^0.]([a-z]+\$?[0-9]+\$?)/gi)).map(match => match[1].replace(/\$/g, '')),
-            ...Array.from(this.rawContent.matchAll(/\.{3}([a-z]+\$?[0-9]+\$?)/gi)).map(match => match[1].replace(/\$/g, '')),
-        ]))]
+        const allReferences = getAllVariableReferences(this.rawContent)
 
-        console.log(variableNames)
+        const toInject = allReferences
+            .mapAndFilter(variableName => {
+                // Test if the variable name matches a cell. If so, strip the $.
+                // If no match, return null, which filters it from the array
+                return /^[a-z]+\$?[0-9]+\$?$/i.test(variableName) ? variableName.replace(/\$/g, '') : null
+            })
 
-        var variablesContent = variableNames.map(name => this.store.getCellByName(name).content)
-
-        const variables = Object.fromEntries(variablesContent.map( (content, i) => [variableNames[i], content] ))
-
+        // Return an object with the variable names as keys, and the variable content.
+        const variables = Object.fromEntries(toInject.map(variableName => {
+            return [variableName, this.store.getCellByName(variableName)?.content]
+        }))
+        
         return variables
     }
     
@@ -307,4 +336,4 @@ class Cell {
 }
 
 export { Cell }
-export default Cells
+export default CellStore

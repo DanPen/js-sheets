@@ -1,9 +1,9 @@
 import { configure } from "mobx"
-import Cells from "./Cells"
+import CellStore from "./CellStore"
 import UIStore from "./UIStore"
 
 configure({
-    disableErrorBoundaries: true,
+    disableErrorBoundaries: false,
     enforceActions: 'never'
 })
 
@@ -13,7 +13,7 @@ class RootStore {
 
     constructor () {
         this.uiStore = new UIStore()
-        this.cellStore = new Cells()
+        this.cellStore = new CellStore()
     }
 }
 

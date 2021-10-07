@@ -2,7 +2,7 @@ import { action, autorun, computed, makeObservable, observable, runInAction } fr
 import { BehaviorSubject, fromEvent, switchMap, timer } from "rxjs"
 import { filter, first, reduce, share, takeUntil } from "rxjs/operators"
 import { cellStore } from "."
-import { cellNameToIndex, indexToCellName } from "./Cells"
+import { cellNameToIndex, indexToCellName } from "./CellStore"
 
 class SelectionManager {
     // Array of selections

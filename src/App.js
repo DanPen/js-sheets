@@ -4,7 +4,24 @@ import { css } from '@emotion/react'
 import './App.css'
 import { observer } from 'mobx-react-lite'
 import { cellStore, uiStore } from './store'
-import { letters } from './store/Cells'
+import { letters } from './store/CellStore'
+
+import ErrorBoundary from './ErrorBoundary'
+
+function tryStringify (object, opts={}) {
+	let stringed
+	try {
+		if (opts.pretty) {
+			stringed = JSON.stringify(object, null, 2)
+		} else {
+			stringed = JSON.stringify(object)
+		}
+	} catch (err) {
+		return 'error JSONifying object'
+	}
+
+	return stringed
+}
 
 const Cell = observer( ({ cell }) => {
 	const selectCell = (e) => {
@@ -27,64 +44,66 @@ const Cell = observer( ({ cell }) => {
 	console.log('render cell')
 
 	return (
-		<td
-			style={{
-				height: 16,
-				textAlign: cell.contentDisplayType === 'number' ? 'right' : 'left',
-				width: 80,
-				fontSize: 14,
-				fontFamily: 'Arial',
-				padding: 5,
-				border: '1px solid #e3e3e3',
-				boxShadow: cell.isSelected ? 'inset 0px 0px 0px 2px #3475e0' : '',
-				whiteSpace: 'nowrap',
-				position: 'relative',
-				overflow: cell.neighborRight?.content && 'hidden',
-				background: cell.isInFullSelection && '#e9f0fc',
-			}}
-			onClick={selectCell}
-			onMouseEnter={hoverCell}
-		>
-			{cell.contentDisplayType === 'object' ? JSON.stringify(cell.content)
-			:cell.contentDisplayType === 'function' ? cell.content.toString()
-			:cell.contentDisplayType === 'promise' ? JSON.stringify(cell.content.value)
-			:cell.contentDisplayType === 'boolean' ? `${cell.content}`
-			:cell.content}
-			
-			{cell.isSelected && (
-				<>
-					<div
-						css={css`
-							position: absolute;
-							top: 2px;
-							font-size: 7px;
-							opacity: 0.75;
-							color: #3475e0;
-						`}
-						style={{
-							right: cell.contentDisplayType !== 'number' ? 3 : '',
-							left: cell.contentDisplayType === 'number' ? 3 : ''
-						}}
-					>
-						{cell.contentDisplayType}
-					</div>
-					<div
-						css={css`
-							position: absolute;
-							bottom: -2px; right: -2px;
-							background-color: #3475e0;
-							border-top: 1px solid #fff;
-							border-left: 1px solid #fff;
-							width: 6px;
-							height: 6px;
-							cursor: crosshair;
-						`}
-						onMouseDown={uiStore.selectionManager.dragAutofill}
-					>
-					</div>
-				</>
-			)}
-		</td>
+		<ErrorBoundary>
+			<td
+				style={{
+					height: 16,
+					textAlign: cell.contentDisplayType === 'number' ? 'right' : 'left',
+					width: 80,
+					fontSize: 14,
+					fontFamily: 'Arial',
+					padding: 5,
+					border: '1px solid #e3e3e3',
+					boxShadow: cell.isSelected ? 'inset 0px 0px 0px 2px #3475e0' : '',
+					whiteSpace: 'nowrap',
+					position: 'relative',
+					overflow: cell.neighborRight?.rawContent && 'hidden',
+					background: cell.isInFullSelection && '#e9f0fc',
+				}}
+				onClick={selectCell}
+				onMouseEnter={hoverCell}
+			>
+				{cell.contentDisplayType === 'object' ? tryStringify(cell.content)
+				:cell.contentDisplayType === 'function' ? cell.content.toString()
+				:cell.contentDisplayType === 'promise' ? cell.content.state === 'fulfilled' ? tryStringify(cell.content.value) : cell.content.state
+				:cell.contentDisplayType === 'boolean' ? `${cell.content}`
+				:cell.content}
+				
+				{cell.isSelected && (
+					<>
+						<div
+							css={css`
+								position: absolute;
+								top: 2px;
+								font-size: 7px;
+								opacity: 0.75;
+								color: #3475e0;
+							`}
+							style={{
+								right: cell.contentDisplayType !== 'number' ? 3 : '',
+								left: cell.contentDisplayType === 'number' ? 3 : ''
+							}}
+						>
+							{cell.contentDisplayType}
+						</div>
+						<div
+							css={css`
+								position: absolute;
+								bottom: -2px; right: -2px;
+								background-color: #3475e0;
+								border-top: 1px solid #fff;
+								border-left: 1px solid #fff;
+								width: 6px;
+								height: 6px;
+								cursor: crosshair;
+							`}
+							onMouseDown={uiStore.selectionManager.dragAutofill}
+						>
+						</div>
+					</>
+				)}
+			</td>
+		</ErrorBoundary>
 	)
 })
 
@@ -122,7 +141,7 @@ const Editor = observer(() => {
 				<div>
 					Function result
 					<textarea readOnly value=
-						{uiStore.selectionManager.currentCell?.contentDisplayType === 'object' ? JSON.stringify(uiStore.selectionManager.currentCell?.content)
+						{uiStore.selectionManager.currentCell?.contentDisplayType === 'object' ? tryStringify(uiStore.selectionManager.currentCell?.content, { pretty: true })
 						:uiStore.selectionManager.currentCell?.contentDisplayType === 'function' ? uiStore.selectionManager.currentCell?.content.toString()
 						:uiStore.selectionManager.currentCell?.content === undefined ? 'undefined'
 						:uiStore.selectionManager.currentCell?.content}
