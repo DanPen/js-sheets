@@ -1,7 +1,8 @@
-import { makeAutoObservable } from "mobx"
+import { autorun, makeAutoObservable, reaction } from "mobx"
 import { fromPromise } from "mobx-utils"
-import { uiStore } from "."
+import { historyStore, uiStore } from "."
 import { getAllVariableReferences } from "../function-parsing"
+import deepDiff from 'deep-diff';
 
 function mapAndFilter (callback) {
     const returning = []
@@ -28,7 +29,7 @@ Set.prototype.mapAndFilter = mapAndFilter
 
 export const letters = ['a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z']
 const initialColumns = letters.length
-const initialRows = 100
+const initialRows = 40
 
 export function cellNameToIndex (name) {
     const match = name.match(/([a-z]+)([0-9]+)/i)
@@ -71,13 +72,21 @@ class CellStore {
         return returning
     }
 
-    constructor () {
+    // Cells with data in them. Used for IO
+    sparseCells = new Set()
+
+    constructor (store) {
+        this.store = store
         makeAutoObservable(this)
 
         this.cells = [...Array(initialRows)].map( (_, rowIndex) => {
             return [...Array(initialColumns)].map( (_, columnIndex) => {
                 return new Cell(this, [ rowIndex, columnIndex ])
             })
+        })
+        
+        autorun(() => {
+            console.log([...this.sparseCells].map(cell => cell))
         })
     }
 }
@@ -92,24 +101,56 @@ class Cell {
     }
 
     // Used for interpretting the cell
-    contentType = 'string'
+    _contentType = 'string'
 
-    // When the user erases a number field, force hideZero to not display the '0' in the spreadsheet
-    hideZero = false
+    set contentType (value) {
+        this._contentType = value
+        this.store.sparseCells.add(this)
+    }
+
+    get contentType () {
+        return this._contentType
+    }
 
     // Cell content as a string, number, or boolean
     _rawContent = ''
+    
+    set rawContent (value) {
+        this._rawContent = value
+        this.store.sparseCells.add(this)
+    }
 
     get rawContent () {
         return this._rawContent
     }
 
-    set rawContent (value) {
-        const { modifiedValue, contentType } = this.inferContentType(value)
+    // Staging for when the user is still editting
+    _contentTypeTemp = ''
 
-        this._rawContent = modifiedValue
-        if (contentType) {
-            this.contentType = contentType
+    // When the user erases a number field, force hideZero to not display the '0' in the spreadsheet
+    hideZero = false
+
+    // Staging for when the user is still editting
+    _rawContentTemp = ''
+
+    isStaging = false
+
+    stageText (value) {
+        this.isStaging = true
+        const { modifiedValue, contentType } = this.inferContentType(value)
+        this._rawContentTemp = modifiedValue
+        this._contentTypeTemp = contentType || this._contentTypeTemp ||this.contentType
+    }
+
+    commitChanges () {
+        if (this.isStaging) {
+            this.rawContent = this._rawContentTemp
+            this.contentType = this._contentTypeTemp
+    
+            this._rawContentTemp = ''
+            this._contentTypeTemp = ''
+    
+            this.isStaging = false
         }
     }
 
@@ -332,6 +373,15 @@ class Cell {
         this.store = store
         makeAutoObservable(this)
         this.index = index
+
+        // For undo/redo
+
+        // Undo/redo
+        ;(async () => {
+            const rootStore = this.store.store
+            const historyStore = await rootStore.getStore('historyStore')
+            historyStore.trackChanges(this, 'rawContent', 'contentType')
+        })()
     }
 }
 

@@ -108,7 +108,9 @@ const Cell = observer( ({ cell }) => {
 })
 
 const Editor = observer(() => {
-	return (
+	const { currentCell } = uiStore.selectionManager
+
+	return currentCell && (
 		<div css={css`
 			height: 100vh;
 			width: 400px;
@@ -117,7 +119,12 @@ const Editor = observer(() => {
 		`}>
 			<div>
 				Content Type
-				<select name="contentType" id="contentType" value={uiStore.selectionManager.currentCell?.contentType} onChange={e => uiStore.selectionManager.currentCell.contentType = e.target.value}>
+				<select
+					name="contentType"
+					id="contentType"
+					value={currentCell.isStaging ? currentCell._contentTypeTemp : currentCell.contentType}
+					onChange={e => currentCell.contentType = e.target.value}
+				>
 					<option value="number">number</option>
 					<option value="string">string</option>
 					<option value="boolean">boolean</option>
@@ -129,24 +136,35 @@ const Editor = observer(() => {
 				Content
 				<textarea 
 					ref={element => uiStore.contentEditorRef = element}
-					value={uiStore.selectionManager.currentCell?.rawContent}
+					value={currentCell.isStaging ? currentCell._rawContentTemp : currentCell.rawContent}
 					onChange={e => {
 						uiStore.selectionManager.forEachSelectedCell(cell => {
-							cell.rawContent = e.target.value
+							cell.stageText(e.target.value)
+						})
+					}}
+					onBlur={e => {
+						uiStore.selectionManager.forEachSelectedCell(cell => {
+							cell.commitChanges()
 						})
 					}}
 				/>
 			</div>
-			{uiStore.selectionManager.currentCell?.contentType === 'function' && (
-				<div>
-					Function result
-					<textarea readOnly value=
-						{uiStore.selectionManager.currentCell?.contentDisplayType === 'object' ? tryStringify(uiStore.selectionManager.currentCell?.content, { pretty: true })
-						:uiStore.selectionManager.currentCell?.contentDisplayType === 'function' ? uiStore.selectionManager.currentCell?.content.toString()
-						:uiStore.selectionManager.currentCell?.content === undefined ? 'undefined'
-						:uiStore.selectionManager.currentCell?.content}
-					/>
-				</div>
+			{currentCell.contentType === 'function' && (
+				<>
+					<div>
+						Function result
+						<textarea readOnly value=
+							{currentCell.contentDisplayType === 'object' ? tryStringify(currentCell.content, { pretty: true })
+							:currentCell.contentDisplayType === 'function' ? currentCell.content.toString()
+							:currentCell.content === undefined ? 'undefined'
+							:currentCell.content}
+						/>
+					</div>
+					<div>
+						Function result type
+						<textarea readOnly value={currentCell.contentDisplayType}/>
+					</div>
+				</>
 			)}
 		</div>
 	)

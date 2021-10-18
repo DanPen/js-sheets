@@ -1,10 +1,47 @@
-import { action, autorun, computed, makeObservable, observable, runInAction } from "mobx"
+import { action, autorun, computed, makeObservable, makeAutoObservable, observable, reaction, runInAction } from "mobx"
 import { BehaviorSubject, fromEvent, switchMap, timer } from "rxjs"
 import { filter, first, reduce, share, takeUntil } from "rxjs/operators"
-import { cellStore } from "."
+import { cellStore, historyStore } from "."
 import { cellNameToIndex, indexToCellName } from "./CellStore"
 
-class SelectionManager {
+class Selection {
+    cells = new Set()
+    firstCell
+    lastCell
+
+    // Can't be an action. That way, we can read the bounds after adding the newest member
+    add (cell) {
+        this.cells.add(cell)
+        if (!this.firstCell) {
+            this.firstCell = cell
+        }
+        this.lastCell = cell
+        runInAction(() => {
+            const cells = cellStore.getCellsInBounds(this.bounds)
+            this.cells = cells
+        })
+    }
+
+    get bounds () {
+        const indices = [this.firstCell, this.lastCell].map(cell => cell.index)
+        const min0 = Math.min(...indices.map(index => index[0]))
+        const max0 = Math.max(...indices.map(index => index[0]))
+        const min1 = Math.min(...indices.map(index => index[1]))
+        const max1 = Math.max(...indices.map(index => index[1]))
+
+        return [[min0, min1], [max0, max1]]
+    }
+
+    constructor () {
+        makeObservable(this, {
+            cells: observable,
+            bounds: computed,
+            add: action
+        })
+    }
+}
+
+export class SelectionManager {
     // Array of selections
     disjointSelections = []
 
@@ -13,16 +50,7 @@ class SelectionManager {
     }
 
     // Object reference to the primary selected cell
-    _currentCell = null
-
-    get currentCell () {
-        return this._currentCell
-    }
-
-    set currentCell (cell) {
-        this._currentCell = cell
-    }
-
+    currentCell = null
     hoveredCell = null
     autofillDirection = undefined
 
@@ -53,7 +81,7 @@ class SelectionManager {
 
         fromEvent(document, 'mouseup').pipe(
             first()
-        ).subscribe(() => {
+        ).subscribe(action(() => {
             disposeAutorun()
 
             this.disjointSelections = [autofillSelection]
@@ -96,7 +124,7 @@ class SelectionManager {
                     
                     let cellFunction = firstCell.rawContent.replaceAll(/([^0.])([a-z]+\$?)([0-9]+\$?)/gi, replacer)
 
-                    cell._rawContent = cellFunction
+                    cell.rawContent = cellFunction
                     cell.contentType = 'function'
                 })
 
@@ -121,7 +149,7 @@ class SelectionManager {
                     cell.rawContent = firstCell.rawContent
                 })
             }
-        })
+        }))
     }
 
     resetAllSelections () {
@@ -153,59 +181,23 @@ class SelectionManager {
         this.allSelectedCells.forEach(callback)
     }
 
-    constructor () {
-        makeObservable(this, {
-            disjointSelections: observable,
-            _currentCell: observable,
-            currentCell: computed,
+    constructor (store) {
+        this.store = store
+
+        makeAutoObservable(this, {
+            currentCell: observable,
             hoveredCell: observable,
-            allSelectedCells: computed,
-            forEachSelectedCell: action,
             autofillDirection: observable
         })
 
         this.disjointSelections = [new Selection()]
-
-        // autorun(() => {
-        //     console.log(this.hoveredCell)
-        // })
-    }
-}
-
-class Selection {
-    cells = new Set()
-    firstCell
-    lastCell
-
-    // Can't be an action. That way, we can read the bounds after adding the newest member
-    add (cell) {
-        this.cells.add(cell)
-        if (!this.firstCell) {
-            this.firstCell = cell
-        }
-        this.lastCell = cell
-        runInAction(() => {
-            const cells = cellStore.getCellsInBounds(this.bounds)
-            this.cells = cells
-        })
-    }
-
-    get bounds () {
-        const indices = [this.firstCell, this.lastCell].map(cell => cell.index)
-        const min0 = Math.min(...indices.map(index => index[0]))
-        const max0 = Math.max(...indices.map(index => index[0]))
-        const min1 = Math.min(...indices.map(index => index[1]))
-        const max1 = Math.max(...indices.map(index => index[1]))
-
-        return [[min0, min1], [max0, max1]]
-    }
-
-    constructor () {
-        makeObservable(this, {
-            cells: observable,
-            bounds: computed,
-            add: action
-        })
+        
+        // Undo/redo
+        // ;(async () => {
+        //     const rootStore = this.store.store
+        //     const historyStore = await rootStore.getStore('historyStore')
+        //     historyStore.trackChanges(this, 'disjointSelections', 'currentCell')
+        // })()
     }
 }
 
@@ -214,13 +206,15 @@ class UIStore {
 
     selectionManager = null
 
-    constructor () {
+    constructor (rootStore) {
+        this.store = rootStore
+
         makeObservable(this, {
             contentEditorRef: observable.ref,
             selectionManager: observable
         })
 
-        this.selectionManager = new SelectionManager()
+        this.selectionManager = new SelectionManager(this)
         this.setupKeyListeners()
     }
 
@@ -232,7 +226,7 @@ class UIStore {
         keyDown$.pipe(
             filter(e => e.key.includes('Arrow') || e.key === 'Enter' || e.key === 'Tab'),
             filter(e => document.activeElement.tagName === 'BODY')          // only if no field is focused.
-        ).subscribe(e => {
+        ).subscribe(action(e => {
             e.preventDefault()
             
             if (!this.selectionManager.currentCell) {
@@ -306,7 +300,34 @@ class UIStore {
                     this.selectionManager.resetAllSelections()
                 }
             }
-        })
+        }))
+
+
+        // Cmd keys (undo/redo, copy/paste, etc)
+        keyDown$.pipe(
+            filter(e => !(e.key.includes('Arrow') || e.key === 'Enter' || e.key === 'Tab')),
+            filter(e => document.activeElement.tagName === 'BODY'),          // only if no field is focused.
+            filter(e => (e.metaKey || e.ctrlKey) && e.key.length === 1)
+        ).subscribe(action(e => {
+
+            let caught = false
+
+            if (e.key === 'z') {
+                caught = true
+                if (e.shiftKey) {
+                    historyStore.redo()
+                }
+                else {
+                    historyStore.undo()
+                }
+            }
+
+            if (caught) {
+                e.preventDefault()
+            }
+
+        }))
+
 
         // Support typing when textarea editor is not selected.
         const keyboardBlur$ = new BehaviorSubject()
@@ -337,25 +358,31 @@ class UIStore {
         //     })
         // })
 
-        injectKeyStrokesToCells$.pipe().subscribe(e => {
+        injectKeyStrokesToCells$.pipe().subscribe(action(e => {
             e.preventDefault()
 
             this.selectionManager.forEachSelectedCell(cell => {
                 if (e.key === 'Backspace' || e.key === 'Delete') {
-                    cell.rawContent = ''//cell.rawContent.substr(0, cell.rawContent.length-1)
+                    if (cell.contentType === 'number') {
+                        cell.rawContent = 0
+                    }
+                    else {
+                        cell.rawContent = ''
+                        cell.contentType = 'string'
+                    }
                 }
                 else {
-                    cell.rawContent += e.key
+                    cell.stageText(e.key)
                 }
             })
-        })
+        }))
 
         injectKeyStrokesToCells$.pipe(
             filter(e => e.key !== 'Backspace' && e.key !== 'Delete'),
             switchMap(e => timer(0))
-        ).subscribe(() => {
+        ).subscribe(action(() => {
             this.contentEditorRef?.focus()
-        })
+        }))
 
         // Now listen for an enter or tab to conclude editting and move the currentCell
         injectKeyStrokesToCells$.pipe(
@@ -363,19 +390,24 @@ class UIStore {
                 filter(e => e.key === 'Enter' || e.key === 'Tab'),
                 first()
             ))
-        ).subscribe(e => {
+        ).subscribe(action(e => {
             e.preventDefault()
             this.contentEditorRef?.blur()
 
-            if (e.key === 'Tab') {
-                this.selectionManager.currentCell = this.selectionManager.currentCell.neighborRight
+            runInAction(() => {
+                if (e.key === 'Tab') {
+                    if (this.selectionManager.currentCell.neighborRight) {
+                        this.selectionManager.currentCell = this.selectionManager.currentCell.neighborRight
+                    }
+                }
+                else if (e.key === 'Enter') {
+                    if (this.selectionManager.currentCell.neighborBottom) {
+                        this.selectionManager.currentCell = this.selectionManager.currentCell.neighborBottom
+                    }
+                }
                 this.selectionManager.resetAllSelections()
-            }
-            else if (e.key === 'Enter') {
-                this.selectionManager.currentCell = this.selectionManager.currentCell.neighborBottom
-                this.selectionManager.resetAllSelections()
-            }
-        })
+            })
+        }))
     }
 }
 
