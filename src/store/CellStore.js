@@ -72,7 +72,7 @@ class CellStore {
         return returning
     }
 
-    // Cells with data in them. Used for IO
+    // Cells with data in them. Used for I/O
     sparseCells = new Set()
 
     constructor (store) {

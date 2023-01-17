@@ -2,6 +2,7 @@ import { configure, makeAutoObservable, toJS, when } from "mobx"
 import CellStore from "./CellStore"
 import UIStore from "./UIStore"
 import HistoryStore from "./HistoryStore"
+const { ipcRenderer } = window.require("electron")
 
 configure({
     disableErrorBoundaries: false,
@@ -24,6 +25,16 @@ class RootStore {
 
         // A gimmick to make getStore work.
         this.stores = {...this}
+
+        ipcRenderer.on('open-file', (event, file, content) => {
+            console.log('event', event, file)
+        })
+
+        // setTimeout(() => {
+        //     ipcRenderer.send('save-file')
+        // }, 3000)
+
+        ipcRenderer.send('store-ready')
     }
 
     getStore (store) {
