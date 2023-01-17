@@ -12,3 +12,4 @@ npm run dev
 
 # Usage
 - Hit `=` on a blank cell to quickly change the cell type to function and prefix it with `return `.
+- Autofill works just like in Excel. Drag the bottom handle to copy your function to new cells. Cell references are changed automatically.
